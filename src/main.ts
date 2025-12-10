@@ -3,7 +3,6 @@ import * as THREE from "three";
 import {
   World,
   Body,
-  Sphere as CSphere,
   Box as CBox,
   Vec3,
   Material,
@@ -17,14 +16,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020416);
 
 const camera = new THREE.PerspectiveCamera(
-  65,
+  70,
   window.innerWidth / window.innerHeight,
   0.1,
   200,
 );
 
-// third-person follow start position
-camera.position.set(0, 5, 12);
+camera.position.set(10, 10, 10);
 camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -32,48 +30,53 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.innerHTML = "";
 document.body.appendChild(renderer.domElement);
 
-// Lighting
+// lighting
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-dirLight.position.set(4, 10, 6);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.position.set(8, 15, 6);
 scene.add(dirLight);
 
 // --------------------------------------------------------
 // PHYSICS WORLD
 // --------------------------------------------------------
 const world = new World({
-  gravity: new Vec3(0, -9, 0),
+  gravity: new Vec3(0, -9.82, 0),
 });
 
 const groundMat = new Material("ground");
-const ballMat = new Material("ball");
+const playerMat = new Material("player");
 
 world.addContactMaterial(
-  new ContactMaterial(groundMat, ballMat, {
+  new ContactMaterial(groundMat, playerMat, {
     friction: 0.8,
-    restitution: 0.1,
+    restitution: 0,
   }),
 );
 
 // --------------------------------------------------------
-// HELPER: create box
+// HELPER TO MAKE BOXES
 // --------------------------------------------------------
-function createBox(
+function makeBox(
   size: Vec3,
-  position: Vec3,
+  pos: Vec3,
   mass: number,
   color: number,
   material?: Material,
 ) {
-  const shape = new CBox(size);
-  const body = new Body({ mass, shape, position, material });
+  const body = new Body({
+    mass,
+    shape: new CBox(size),
+    position: pos.clone(),
+    material,
+  });
   if (mass === 0) body.type = Body.STATIC;
+
   world.addBody(body);
 
-  const geo = new THREE.BoxGeometry(size.x * 2, size.y * 2, size.z * 2);
-  const mat = new THREE.MeshStandardMaterial({ color });
-  const mesh = new THREE.Mesh(geo, mat);
-
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x * 2, size.y * 2, size.z * 2),
+    new THREE.MeshStandardMaterial({ color }),
+  );
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
@@ -82,55 +85,69 @@ function createBox(
 }
 
 // --------------------------------------------------------
-// GROUND PLATFORM
+// GROUND
 // --------------------------------------------------------
-const ground = createBox(
-  new Vec3(10, 0.5, 10),
-  new Vec3(0, -0.5, 0),
+const ground = makeBox(
+  new Vec3(20, 0.1, 20),
+  new Vec3(0, 0.1, 0),
   0,
   0x222244,
   groundMat,
 );
-
+void ground;
 // --------------------------------------------------------
-// BALL PLAYER
+// CROSS WALLS (ORIGINAL HEIGHT = 1.2)
 // --------------------------------------------------------
-const BALL_RADIUS = 0.5;
+const WALL_H = 1.2;
+const WALL_THICK = 0.4;
 
-const ballBody = new Body({
-  mass: 1,
-  shape: new CSphere(BALL_RADIUS),
-  position: new Vec3(0, 1, 0),
-  material: ballMat,
-});
-ballBody.linearDamping = 0.2;
-ballBody.angularDamping = 0.3;
-world.addBody(ballBody);
-
-const ballMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(BALL_RADIUS, 32, 16),
-  new THREE.MeshStandardMaterial({
-    color: 0x33ccff,
-    emissive: 0x113344,
-  }),
-);
-ballMesh.castShadow = true;
-ballMesh.receiveShadow = true;
-scene.add(ballMesh);
-
-// --------------------------------------------------------
-// BUTTON (goal)
-// --------------------------------------------------------
-const button = createBox(
-  new Vec3(0.4, 0.2, 0.4),
-  new Vec3(-3, 0.2, -3),
+// Vertical wall (Z axis) — goes full length of the ground
+makeBox(
+  new Vec3(WALL_THICK, WALL_H, 20), // full half-extent of ground in Z
+  new Vec3(0, WALL_H + 0.1, 0),
   0,
-  0xff3366,
+  0xaa3344,
   groundMat,
 );
-(button.mesh.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(
-  0xff3366,
+
+// Horizontal wall (X axis) — goes full length of the ground
+makeBox(
+  new Vec3(20, WALL_H, WALL_THICK), // full half-extent of ground in X
+  new Vec3(0, WALL_H + 0.1, 0),
+  0,
+  0xaa3344,
+  groundMat,
 );
+
+// --------------------------------------------------------
+// PLAYER CUBE (non rotating)
+// --------------------------------------------------------
+const PLAYER_SIZE = new Vec3(0.4, 0.4, 0.4);
+
+const playerBody = new Body({
+  mass: 1,
+  shape: new CBox(PLAYER_SIZE),
+  position: new Vec3(0, 2, -6),
+  material: playerMat,
+});
+
+// prevent rotation
+playerBody.fixedRotation = true;
+playerBody.updateMassProperties();
+
+playerBody.linearDamping = 0.4;
+
+world.addBody(playerBody);
+
+const playerMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(
+    PLAYER_SIZE.x * 2,
+    PLAYER_SIZE.y * 2,
+    PLAYER_SIZE.z * 2,
+  ),
+  new THREE.MeshStandardMaterial({ color: 0x33ccff }),
+);
+scene.add(playerMesh);
 
 // --------------------------------------------------------
 // INPUT
@@ -139,106 +156,65 @@ const keys: Record<string, boolean> = {};
 window.addEventListener("keydown", (e) => (keys[e.key.toLowerCase()] = true));
 window.addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
 
+let canJump = false;
+
 // --------------------------------------------------------
 // UPDATE LOOP
 // --------------------------------------------------------
-let lastTime = performance.now() / 1000;
+let last = performance.now() / 1000;
 
 function update(dt: number) {
-  // ----------------------------------------------------
-  // CAMERA-RELATIVE MOVEMENT
-  // ----------------------------------------------------
-  const forward = new THREE.Vector3();
-  camera.getWorldDirection(forward);
-  forward.y = 0;
-  forward.normalize();
+  const moveForce = 25;
 
-  const right = new THREE.Vector3();
-  right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  // WASD movement
+  const force = new Vec3(0, 0, 0);
+  if (keys["w"]) force.z -= moveForce;
+  if (keys["s"]) force.z += moveForce;
+  if (keys["a"]) force.x -= moveForce;
+  if (keys["d"]) force.x += moveForce;
 
-  const move = new THREE.Vector3();
-  if (keys["w"]) move.add(forward);
-  if (keys["s"]) move.sub(forward);
-  if (keys["d"]) move.add(right);
-  if (keys["a"]) move.sub(right);
+  playerBody.applyForce(force, playerBody.position);
 
-  if (move.lengthSq() > 0) {
-    move.normalize();
-    const moveForce = 22;
-    ballBody.applyForce(
-      new Vec3(move.x * moveForce, 0, move.z * moveForce),
-      ballBody.position,
-    );
+  // Jump detection (simple ground check)
+  canJump = playerBody.position.y <= PLAYER_SIZE.y + 0.55;
+
+  if (keys[" "] && canJump) {
+    playerBody.applyImpulse(new Vec3(0, 1.5, 0), playerBody.position);
   }
 
-  // ----------------------------------------------------
-  // PLATFORM BOUNDARY
-  // ----------------------------------------------------
-  const LIMIT = 9;
-  if (ballBody.position.x > LIMIT) {
-    ballBody.position.x = LIMIT;
-    ballBody.velocity.x *= -0.3;
-  }
-  if (ballBody.position.x < -LIMIT) {
-    ballBody.position.x = -LIMIT;
-    ballBody.velocity.x *= -0.3;
-  }
-  if (ballBody.position.z > LIMIT) {
-    ballBody.position.z = LIMIT;
-    ballBody.velocity.z *= -0.3;
-  }
-  if (ballBody.position.z < -LIMIT) {
-    ballBody.position.z = -LIMIT;
-    ballBody.velocity.z *= -0.3;
-  }
-
-  // ----------------------------------------------------
-  // PHYSICS STEP
-  // ----------------------------------------------------
   world.step(1 / 60, dt);
 
-  // ----------------------------------------------------
-  // SYNC MESHES
-  // ----------------------------------------------------
-  ballMesh.position.copy(ballBody.position);
-  ballMesh.quaternion.copy(ballBody.quaternion);
+  // sync mesh
+  playerMesh.position.copy(playerBody.position);
+  playerMesh.quaternion.copy(playerBody.quaternion);
 
-  ground.mesh.position.copy(ground.body.position);
-  ground.mesh.quaternion.copy(ground.body.quaternion);
-
-  button.mesh.position.copy(button.body.position);
-  button.mesh.quaternion.copy(button.body.quaternion);
-
-  // ----------------------------------------------------
-  // THIRD-PERSON FOLLOW CAMERA 🔥🔥🔥
-  // ----------------------------------------------------
-  const camTarget = new THREE.Vector3(
-    ballBody.position.x,
-    ballBody.position.y + 3.5, // height above ball
-    ballBody.position.z + 8, // behind ball
+  // camera follow
+  const camPos = new THREE.Vector3(
+    playerBody.position.x, // no sideways shift
+    playerBody.position.y + 12, // height
+    playerBody.position.z + 10, // behind the player on Z axis
   );
 
-  // smooth camera motion
-  camera.position.lerp(camTarget, 0.08);
-
-  // always look at the ball
-  camera.lookAt(ballBody.position.x, ballBody.position.y, ballBody.position.z);
+  camera.position.lerp(camPos, 0.12);
+  camera.lookAt(
+    playerBody.position.x,
+    playerBody.position.y + 1, // makes camera tilt down slightly
+    playerBody.position.z,
+  );
 }
 
+// --------------------------------------------------------
 function loop() {
   const now = performance.now() / 1000;
-  const dt = now - lastTime;
-  lastTime = now;
+  update(now - last);
+  last = now;
 
-  update(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
 
 loop();
 
-// --------------------------------------------------------
-// RESIZE HANDLER
 // --------------------------------------------------------
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
