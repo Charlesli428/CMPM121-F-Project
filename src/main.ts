@@ -259,3 +259,4 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+// much better but the movement isnt directly right of camera and there's no jumping
