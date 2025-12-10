@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>F1 Space Button Game</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: black;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-DSeCTuew.js"></script>
+  </head>
+  <body>
+
+    <!-- HUD Score + Timer -->
+    <div id="hud" style="
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: sans-serif;
+      font-size: 20px;">
+      Score: <span id="score">0</span><br />
+      Time: <span id="time">30.0</span>
+    </div>
+
+    <!-- Win/Lose Message -->
+    <div id="message" style="
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 32px;
+      color: yellow;
+      font-family: sans-serif;
+      display: none;">
+    </div>
+
+    <!-- Main Game Script -->
+  </body>
+</html>
