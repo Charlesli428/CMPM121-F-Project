@@ -1,0 +1,6 @@
+
+echo "Running lint-staged..."
+npx lint-staged || exit 1
+
+echo "Typechecking..."
+npm run typecheck || exit 1
