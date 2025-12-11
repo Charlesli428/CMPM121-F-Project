@@ -21,7 +21,6 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   200,
 );
-
 camera.position.set(10, 10, 10);
 camera.lookAt(0, 0, 0);
 
@@ -48,13 +47,13 @@ const playerMat = new Material("player");
 
 world.addContactMaterial(
   new ContactMaterial(groundMat, playerMat, {
-    friction: 0.8,
+    friction: 0.012,
     restitution: 0,
   }),
 );
 
 // --------------------------------------------------------
-// HELPER TO MAKE BOXES
+// HELPER: MAKE BOX
 // --------------------------------------------------------
 function makeBox(
   size: Vec3,
@@ -66,61 +65,64 @@ function makeBox(
   const body = new Body({
     mass,
     shape: new CBox(size),
-    position: pos.clone(),
+    position: pos,
     material,
   });
-  if (mass === 0) body.type = Body.STATIC;
 
+  if (mass === 0) body.type = Body.STATIC;
   world.addBody(body);
 
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size.x * 2, size.y * 2, size.z * 2),
     new THREE.MeshStandardMaterial({ color }),
   );
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
 
+  scene.add(mesh);
   return { body, mesh };
 }
 
 // --------------------------------------------------------
 // GROUND
 // --------------------------------------------------------
-const ground = makeBox(
-  new Vec3(20, 0.1, 20),
-  new Vec3(0, 0.1, 0),
+makeBox(new Vec3(20, 0.1, 20), new Vec3(0, 0.1, 0), 0, 0x222244, groundMat);
+
+// --------------------------------------------------------
+// BUTTON (PLACE OUTSIDE CENTER)
+// --------------------------------------------------------
+const button = makeBox(
+  new Vec3(0.7, 0.3, 0.7),
+  new Vec3(-7, 0.35, 7), // WORKS NOW
   0,
-  0x222244,
+  0xff3366,
   groundMat,
 );
-void ground;
+
+// glow
+(button.mesh.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(
+  0xff3366,
+);
+
 // --------------------------------------------------------
-// CROSS WALLS (ORIGINAL HEIGHT = 1.2)
+// CROSS WALLS
 // --------------------------------------------------------
 const WALL_H = 1.2;
 const WALL_THICK = 0.4;
 
-// Vertical wall (Z axis) — goes full length of the ground
 makeBox(
-  new Vec3(WALL_THICK, WALL_H, 20), // full half-extent of ground in Z
+  new Vec3(WALL_THICK, WALL_H, 20),
   new Vec3(0, WALL_H + 0.1, 0),
   0,
   0xaa3344,
-  groundMat,
 );
-
-// Horizontal wall (X axis) — goes full length of the ground
 makeBox(
-  new Vec3(20, WALL_H, WALL_THICK), // full half-extent of ground in X
+  new Vec3(20, WALL_H, WALL_THICK),
   new Vec3(0, WALL_H + 0.1, 0),
   0,
   0xaa3344,
-  groundMat,
 );
 
 // --------------------------------------------------------
-// PLAYER CUBE (non rotating)
+// PLAYER
 // --------------------------------------------------------
 const PLAYER_SIZE = new Vec3(0.4, 0.4, 0.4);
 
@@ -130,12 +132,9 @@ const playerBody = new Body({
   position: new Vec3(0, 2, -6),
   material: playerMat,
 });
-
-// prevent rotation
 playerBody.fixedRotation = true;
 playerBody.updateMassProperties();
-
-playerBody.linearDamping = 0.4;
+playerBody.linearDamping = 0.15;
 
 world.addBody(playerBody);
 
@@ -156,8 +155,6 @@ const keys: Record<string, boolean> = {};
 window.addEventListener("keydown", (e) => (keys[e.key.toLowerCase()] = true));
 window.addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
 
-let canJump = false;
-
 // --------------------------------------------------------
 // UPDATE LOOP
 // --------------------------------------------------------
@@ -166,7 +163,7 @@ let last = performance.now() / 1000;
 function update(dt: number) {
   const moveForce = 25;
 
-  // WASD movement
+  // Movement
   const force = new Vec3(0, 0, 0);
   if (keys["w"]) force.z -= moveForce;
   if (keys["s"]) force.z += moveForce;
@@ -175,35 +172,36 @@ function update(dt: number) {
 
   playerBody.applyForce(force, playerBody.position);
 
-  // Jump detection (simple ground check)
-  canJump = playerBody.position.y <= PLAYER_SIZE.y + 0.55;
-
-  if (keys[" "] && canJump) {
+  // Jump
+  const onGround = playerBody.position.y <= PLAYER_SIZE.y + 0.55;
+  if (keys[" "] && onGround) {
     playerBody.applyImpulse(new Vec3(0, 1.5, 0), playerBody.position);
   }
 
   world.step(1 / 60, dt);
 
-  // sync mesh
+  // SYNC PLAYER
   playerMesh.position.copy(playerBody.position);
   playerMesh.quaternion.copy(playerBody.quaternion);
 
-  // camera follow
-  const camPos = new THREE.Vector3(
-    playerBody.position.x, // no sideways shift
-    playerBody.position.y + 12, // height
-    playerBody.position.z + 10, // behind the player on Z axis
-  );
+  // SYNC BUTTON (THIS WAS MISSING BEFORE)
+  button.mesh.position.copy(button.body.position);
+  button.mesh.quaternion.copy(button.body.quaternion);
 
-  camera.position.lerp(camPos, 0.12);
+  // CAMERA FOLLOW
+  const camTarget = new THREE.Vector3(
+    playerBody.position.x,
+    playerBody.position.y + 12,
+    playerBody.position.z + 10,
+  );
+  camera.position.lerp(camTarget, 0.12);
   camera.lookAt(
     playerBody.position.x,
-    playerBody.position.y + 1, // makes camera tilt down slightly
+    playerBody.position.y + 1,
     playerBody.position.z,
   );
 }
 
-// --------------------------------------------------------
 function loop() {
   const now = performance.now() / 1000;
   update(now - last);
