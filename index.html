@@ -12,7 +12,19 @@
         background: black;
         font-family: sans-serif;
       }
+      #langButtons {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 20;
+      }
 
+      #langButtons button {
+        margin-left: 6px;
+        font-size: 16px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
       #hud {
         position: absolute;
         top: 10px;
@@ -35,17 +47,40 @@
         text-shadow: 0 0 10px black;
       }
     </style>
+    <style>
+      /* RTL support for Arabic */
+      body[lang="ar"] #hud {
+        direction: rtl;
+        unicode-bidi: bidi-override;
+        text-align: right;
+      }
+
+      /* Normal LTR for English + Chinese */
+      body[lang="en"] #hud,
+      body[lang="zh"] #hud {
+        direction: ltr;
+        unicode-bidi: normal;
+        text-align: left;
+      }
+    </style>
+    <!-- RTL style injector (Arabic only) -->
+    <style id="rtlStyle"></style>
+
   </head>
 
   <body>
+    <div id="langButtons">
+      <button data-lang="en">EN</button>
+      <button data-lang="zh">中文</button>
+      <button data-lang="ar">العربية</button>
+    </div>
     <!-- HUD -->
     <div id="hud">
-      Score: <span id="score">0</span><br />
-      Time: <span id="time">30.0</span><br /><br />
+      <span id="labelScore"></span>: <span id="score">0</span><br />
+      <span id="labelTime"></span>: <span id="time">30.0</span><br /><br />
 
       <div id="keyBox" style="margin-top: 6px; line-height: 1.4;"></div>
     </div>
-
 
     <!-- Win / Lose text -->
     <div id="message"></div>
