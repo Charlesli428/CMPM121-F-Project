@@ -8,6 +8,8 @@ import {
   Material,
   ContactMaterial,
 } from "cannon-es";
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 
 // --------------------------------------------------------
 // SCENE + CAMERA + RENDERER
@@ -19,12 +21,13 @@ const camera = new THREE.PerspectiveCamera(
   70,
   window.innerWidth / window.innerHeight,
   0.1,
-  200,
+  1000, // ↑ farther clip to comfortably include scene 2
 );
 camera.position.set(10, 12, 14);
 camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // ↑ crisper + stable
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -45,6 +48,12 @@ const hudKeyBox = document.getElementById("keyBox")!;
 let score = 0;
 let timeLeft = 60;
 let gameOver = false;
+
+// 1 = arena, 2 = second room (far in +Z)
+let sceneState: 1 | 2 = 1;
+
+// offset for second scene
+const SCENE2_Z_OFFSET = 100;
 
 // --------------------------------------------------------
 // INVENTORY SYSTEM
@@ -115,6 +124,7 @@ function makeBox(
   );
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.frustumCulled = false; // why: avoid any mis-culling when far from origin
 
   scene.add(mesh);
 
@@ -136,64 +146,122 @@ function makeInvisibleWall(size: Vec3, pos: Vec3, material?: Material) {
 }
 
 // --------------------------------------------------------
-// GROUND
-// --------------------------------------------------------
-makeBox(new Vec3(20, 0.1, 20), new Vec3(0, 0.1, 0), 0, 0x222244, groundMat);
-
-// --------------------------------------------------------
-// CROSS WALLS
+// ARENA TEMPLATE (GROUND + CROSS WALLS + BOUNDARIES)
 // --------------------------------------------------------
 const WALL_H = 1.2;
 const WALL_THICK = 0.4;
-
-makeBox(
-  new Vec3(WALL_THICK, WALL_H, 20),
-  new Vec3(0, WALL_H + 0.1, 0),
-  0,
-  0xaa3344,
-  wallMat,
-);
-
-makeBox(
-  new Vec3(20, WALL_H, WALL_THICK),
-  new Vec3(0, WALL_H + 0.1, 0),
-  0,
-  0xaa3344,
-  wallMat,
-);
-// --------------------------------------------------------
-// ARENA INVISIBLE BOUNDARIES
-// --------------------------------------------------------
 const BARRIER_THICK = 0.5;
 const BARRIER_SIZE = 20; // matches arena size
 
-// Left wall (at x = -20.5)
-makeInvisibleWall(
-  new Vec3(BARRIER_THICK, 5, BARRIER_SIZE),
-  new Vec3(-20.5, 5, 0),
+// ✨ changed: added optional gridColor
+function createArena(offsetZ: number, gridColor?: number) {
+  // Ground
+  makeBox(
+    new Vec3(20, 0.1, 20),
+    new Vec3(0, 0.1, offsetZ),
+    0,
+    0x222244,
+    groundMat,
+  );
+
+  // Cross walls
+  makeBox(
+    new Vec3(WALL_THICK, WALL_H, 20),
+    new Vec3(0, WALL_H + 0.1, offsetZ),
+    0,
+    0xaa3344,
+    wallMat,
+  );
+
+  makeBox(
+    new Vec3(20, WALL_H, WALL_THICK),
+    new Vec3(0, WALL_H + 0.1, offsetZ),
+    0,
+    0xaa3344,
+    wallMat,
+  );
+
+  // Invisible boundaries
+  makeInvisibleWall(
+    new Vec3(BARRIER_THICK, 5, BARRIER_SIZE),
+    new Vec3(-20.5, 5, offsetZ),
+    wallMat,
+  );
+  makeInvisibleWall(
+    new Vec3(BARRIER_THICK, 5, BARRIER_SIZE),
+    new Vec3(20.5, 5, offsetZ),
+    wallMat,
+  );
+  makeInvisibleWall(
+    new Vec3(BARRIER_SIZE, 5, BARRIER_THICK),
+    new Vec3(0, 5, offsetZ - 20.5),
+    wallMat,
+  );
+  makeInvisibleWall(
+    new Vec3(BARRIER_SIZE, 5, BARRIER_THICK),
+    new Vec3(0, 5, offsetZ + 20.5),
+    wallMat,
+  );
+
+  // Grid helper (colored for scene 2)
+  const grid = new THREE.GridHelper(
+    40,
+    40,
+    gridColor ?? 0x444444, // center lines
+    gridColor ?? 0x222222, // rest of lines
+  );
+  grid.position.set(0, 0.001, offsetZ);
+  (grid.material as THREE.Material).depthWrite = true;
+  scene.add(grid);
+}
+
+// Create both arenas: Scene 1 at z=0, Scene 2 at z=SCENE2_Z_OFFSET
+createArena(0); // default grid color
+createArena(SCENE2_Z_OFFSET, 0x00ffcc); // 💡 bright cyan grid in scene 2
+
+// --------------------------------------------------------
+// DOORS (SCENE 1 NORTH WALL → SCENE 2, SCENE 2 SOUTH WALL → SCENE 1)
+// --------------------------------------------------------
+
+// Door in Scene 1 at north side (z ≈ +20)
+const door1 = makeBox(
+  new Vec3(1, 1.8, 0.5),
+  new Vec3(15, 0.9, 20),
+  0,
+  0x8888ff,
   wallMat,
 );
 
-// Right wall (at x = +20.5)
-makeInvisibleWall(
-  new Vec3(BARRIER_THICK, 5, BARRIER_SIZE),
-  new Vec3(20.5, 5, 0),
+// Door in Scene 2 at south side (z ≈ SCENE2_Z_OFFSET - 20)
+const door2 = makeBox(
+  new Vec3(1, 1.8, 0.5),
+  new Vec3(15, 0.9, SCENE2_Z_OFFSET - 20),
+  0,
+  0xff8888,
   wallMat,
 );
 
-// Bottom wall (z = -20.5)
-makeInvisibleWall(
-  new Vec3(BARRIER_SIZE, 5, BARRIER_THICK),
-  new Vec3(0, 5, -20.5),
-  wallMat,
-);
+function goToScene1() {
+  sceneState = 1;
+  player.body.velocity.set(0, 0, 0);
+  player.body.angularVelocity.set(0, 0, 0);
+  player.body.position.set(0, 2, -6);
 
-// Top wall (z = +20.5)
-makeInvisibleWall(
-  new Vec3(BARRIER_SIZE, 5, BARRIER_THICK),
-  new Vec3(0, 5, 20.5),
-  wallMat,
-);
+  hudMsg.style.display = "block";
+  hudMsg.textContent = "Back to Scene 1";
+  setTimeout(() => (hudMsg.style.display = "none"), 800);
+}
+
+function goToScene2() {
+  sceneState = 2;
+  player.body.velocity.set(0, 0, 0);
+  player.body.angularVelocity.set(0, 0, 0);
+  player.body.position.set(0, 2, SCENE2_Z_OFFSET);
+
+  hudMsg.style.display = "block";
+  hudMsg.textContent = "Entered Scene 2";
+  setTimeout(() => (hudMsg.style.display = "none"), 800);
+}
 
 // --------------------------------------------------------
 // PLAYER CUBE
@@ -207,31 +275,37 @@ player.body.updateMassProperties();
 player.body.linearDamping = 0.15;
 
 // --------------------------------------------------------
-// KEY SPAWNING
+// KEY SPAWNING (RANDOM SCENE 1 OR 2)
 // --------------------------------------------------------
 function spawnKey(color: string) {
   const size = new Vec3(0.3, 0.3, 0.3);
 
+  const sceneIndex: 1 | 2 = Math.random() < 0.5 ? 1 : 2;
+  const baseZ = sceneIndex === 1 ? 0 : SCENE2_Z_OFFSET;
+
   const pos = new Vec3(
     THREE.MathUtils.randFloat(-19, 19),
     0.5,
-    THREE.MathUtils.randFloat(-19, 19),
+    THREE.MathUtils.randFloat(-19, 19) + baseZ,
   );
 
   const keyObj = makeBox(size, pos, 0, keyColorHex(color), groundMat);
-  return { ...keyObj, color };
+  return { ...keyObj, color, scene: sceneIndex };
 }
 
 let key = spawnKey("red");
 
 // --------------------------------------------------------
-// BUTTON (GOAL)
+// BUTTON (GOAL) — RANDOM SCENE 1 OR 2
 // --------------------------------------------------------
 function spawnButton() {
   const size = new Vec3(0.7, 0.3, 0.7);
 
   const colorName = keyColors[Math.floor(Math.random() * keyColors.length)];
   const colorHex = keyColorHex(colorName);
+
+  const sceneIndex: 1 | 2 = Math.random() < 0.5 ? 1 : 2;
+  const baseZ = sceneIndex === 1 ? 0 : SCENE2_Z_OFFSET;
 
   const quadrants = [
     { xMin: -19, xMax: -1, zMin: -19, zMax: -1 },
@@ -243,16 +317,15 @@ function spawnButton() {
   const q = quadrants[Math.floor(Math.random() * quadrants.length)];
 
   const randX = THREE.MathUtils.randFloat(q.xMin + 1.5, q.xMax - 1.5);
-  const randZ = THREE.MathUtils.randFloat(q.zMin + 1.5, q.zMax - 1.5);
-
-  const pos = new Vec3(randX, 0.3, randZ);
+  const randZLocal = THREE.MathUtils.randFloat(q.zMin + 1.5, q.zMax - 1.5);
+  const pos = new Vec3(randX, 0.3, randZLocal + baseZ);
 
   const btn = makeBox(size, pos, 0, colorHex, groundMat);
   (btn.mesh.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(
     colorHex,
   );
 
-  return { ...btn, color: colorName };
+  return { ...btn, color: colorName, scene: sceneIndex };
 }
 
 let button = spawnButton();
@@ -272,10 +345,40 @@ window.addEventListener(
 );
 
 // --------------------------------------------------------
+// CLICK TO PICK UP KEY
+// --------------------------------------------------------
+window.addEventListener("mousedown", (event) => {
+  if (!key) return;
+
+  // Convert mouse position to NDC space
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObject(key.mesh, false);
+
+  if (intersects.length > 0) {
+    // Pick up key
+    heldKey = key.color;
+    updateKeyBox();
+    scene.remove(key.mesh);
+    world.removeBody(key.body);
+  }
+});
+// --------------------------------------------------------
 // UPDATE LOOP
 // --------------------------------------------------------
 let last = performance.now() / 1000;
 let hitCooldown = 0;
+
+// fixed-step physics for stability
+const FIXED_STEP = 1 / 60;
+const MAX_SUBSTEPS = 5;
+
+// reusable vectors to reduce GC churn
+const camTarget = new THREE.Vector3();
+const camPos = new THREE.Vector3();
+const lightPos = new THREE.Vector3();
 
 function update(dt: number) {
   if (gameOver) return;
@@ -283,7 +386,6 @@ function update(dt: number) {
   timeLeft -= dt;
   if (timeLeft < 0) timeLeft = 0;
   hudTime.textContent = timeLeft.toFixed(1);
-
   if (timeLeft <= 0) return endGame(false);
 
   hitCooldown -= dt;
@@ -291,12 +393,10 @@ function update(dt: number) {
   // movement
   const moveForce = 25;
   const force = new Vec3(0, 0, 0);
-
   if (keysPressed["w"]) force.z -= moveForce;
   if (keysPressed["s"]) force.z += moveForce;
   if (keysPressed["a"]) force.x -= moveForce;
   if (keysPressed["d"]) force.x += moveForce;
-
   player.body.applyForce(force, player.body.position);
 
   // jump
@@ -305,12 +405,16 @@ function update(dt: number) {
     player.body.applyImpulse(new Vec3(0, 1.5, 0), player.body.position);
   }
 
-  world.step(1 / 60, dt);
+  // stable physics step (why: avoids jitter “glitchy” feeling)
+  world.step(FIXED_STEP, dt, MAX_SUBSTEPS);
 
-  // sync player and button meshes
-  [player, button, key].forEach((obj) => {
-    obj.mesh.position.copy(obj.body.position);
-    obj.mesh.quaternion.copy(obj.body.quaternion);
+  // sync player, button, key, doors
+  [player, button, key, door1, door2].forEach((obj) => {
+    if (!obj) return;
+    obj.mesh.position.copy(obj.body.position as unknown as THREE.Vector3);
+    obj.mesh.quaternion.copy(
+      obj.body.quaternion as unknown as THREE.Quaternion,
+    );
   });
 
   // KEY PICKUP
@@ -318,7 +422,6 @@ function update(dt: number) {
   if (keyDist < 1) {
     heldKey = key.color;
     updateKeyBox();
-
     scene.remove(key.mesh);
     world.removeBody(key.body);
   }
@@ -327,14 +430,12 @@ function update(dt: number) {
   const dist = player.body.position.vsub(button.body.position).length();
   if (dist < 1 && hitCooldown <= 0) {
     hitCooldown = 0.3;
-
     if (heldKey !== button.color) {
       hudMsg.style.display = "block";
       hudMsg.textContent = "WRONG KEY!";
       setTimeout(() => (hudMsg.style.display = "none"), 700);
       return;
     }
-
     // correct key
     score++;
     hudScore.textContent = String(score);
@@ -354,22 +455,37 @@ function update(dt: number) {
     if (score >= 10) endGame(true);
   }
 
-  // camera
-  camera.position.lerp(
-    new THREE.Vector3(
-      player.body.position.x,
-      player.body.position.y + 12,
-      player.body.position.z + 10,
-    ),
-    0.12,
+  // DOOR INTERACTION: SCENE SWITCHING
+  const d1 = player.body.position.vsub(door1.body.position).length();
+  if (sceneState === 1 && d1 < 1.5) {
+    goToScene2();
+  }
+  const d2 = player.body.position.vsub(door2.body.position).length();
+  if (sceneState === 2 && d2 < 1.5) {
+    goToScene1();
+  }
+
+  // camera follow
+  camPos.set(
+    player.body.position.x,
+    player.body.position.y + 12,
+    player.body.position.z + 10,
   );
-  camera.lookAt(
-    new THREE.Vector3(
-      player.body.position.x,
-      player.body.position.y,
-      player.body.position.z,
-    ),
+  camera.position.lerp(camPos, 0.12);
+  camTarget.set(
+    player.body.position.x,
+    player.body.position.y,
+    player.body.position.z,
   );
+  camera.lookAt(camTarget);
+
+  // keep the light near the player (why: consistent lighting in both scenes)
+  lightPos.set(
+    player.body.position.x + 8,
+    player.body.position.y + 15,
+    player.body.position.z + 6,
+  );
+  dirLight.position.lerp(lightPos, 0.2);
 }
 
 function endGame(win: boolean) {
