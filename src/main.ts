@@ -21,12 +21,12 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   200,
 );
-camera.position.set(10, 10, 10);
+
+camera.position.set(10, 12, 14);
 camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.innerHTML = "";
 document.body.appendChild(renderer.domElement);
 
 // lighting
@@ -36,24 +36,43 @@ dirLight.position.set(8, 15, 6);
 scene.add(dirLight);
 
 // --------------------------------------------------------
+// HUD
+// --------------------------------------------------------
+const hudScore = document.getElementById("score")!;
+const hudTime = document.getElementById("time")!;
+const hudMsg = document.getElementById("message")!;
+
+let score = 0;
+let timeLeft = 30;
+let gameOver = false;
+
+// --------------------------------------------------------
 // PHYSICS WORLD
 // --------------------------------------------------------
-const world = new World({
-  gravity: new Vec3(0, -9.82, 0),
-});
+const world = new World({ gravity: new Vec3(0, -20, 0) });
 
 const groundMat = new Material("ground");
 const playerMat = new Material("player");
+const wallMat = new Material("wall");
 
+// ground ↔ player friction
 world.addContactMaterial(
   new ContactMaterial(groundMat, playerMat, {
-    friction: 0.012,
+    friction: 0.01,
+    restitution: 0,
+  }),
+);
+
+// wall ↔ player friction FIX (makes sliding smooth)
+world.addContactMaterial(
+  new ContactMaterial(wallMat, playerMat, {
+    friction: 0,
     restitution: 0,
   }),
 );
 
 // --------------------------------------------------------
-// HELPER: MAKE BOX
+// HELPER: BOX CREATOR
 // --------------------------------------------------------
 function makeBox(
   size: Vec3,
@@ -65,11 +84,11 @@ function makeBox(
   const body = new Body({
     mass,
     shape: new CBox(size),
-    position: pos,
+    position: pos.clone(),
     material,
   });
-
   if (mass === 0) body.type = Body.STATIC;
+
   world.addBody(body);
 
   const mesh = new THREE.Mesh(
@@ -77,8 +96,11 @@ function makeBox(
     new THREE.MeshStandardMaterial({ color }),
   );
 
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   scene.add(mesh);
-  return { body, mesh };
+
+  return { body, mesh, size };
 }
 
 // --------------------------------------------------------
@@ -87,66 +109,71 @@ function makeBox(
 makeBox(new Vec3(20, 0.1, 20), new Vec3(0, 0.1, 0), 0, 0x222244, groundMat);
 
 // --------------------------------------------------------
-// BUTTON (PLACE OUTSIDE CENTER)
-// --------------------------------------------------------
-const button = makeBox(
-  new Vec3(0.7, 0.3, 0.7),
-  new Vec3(-7, 0.35, 7), // WORKS NOW
-  0,
-  0xff3366,
-  groundMat,
-);
-
-// glow
-(button.mesh.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(
-  0xff3366,
-);
-
-// --------------------------------------------------------
 // CROSS WALLS
 // --------------------------------------------------------
 const WALL_H = 1.2;
 const WALL_THICK = 0.4;
 
+// vertical
 makeBox(
   new Vec3(WALL_THICK, WALL_H, 20),
   new Vec3(0, WALL_H + 0.1, 0),
   0,
   0xaa3344,
+  wallMat,
 );
+
+// horizontal
 makeBox(
   new Vec3(20, WALL_H, WALL_THICK),
   new Vec3(0, WALL_H + 0.1, 0),
   0,
   0xaa3344,
+  wallMat,
 );
 
 // --------------------------------------------------------
-// PLAYER
+// PLAYER CUBE
 // --------------------------------------------------------
 const PLAYER_SIZE = new Vec3(0.4, 0.4, 0.4);
 
-const playerBody = new Body({
-  mass: 1,
-  shape: new CBox(PLAYER_SIZE),
-  position: new Vec3(0, 2, -6),
-  material: playerMat,
-});
-playerBody.fixedRotation = true;
-playerBody.updateMassProperties();
-playerBody.linearDamping = 0.15;
+const player = makeBox(PLAYER_SIZE, new Vec3(0, 2, -6), 1, 0x33ccff, playerMat);
 
-world.addBody(playerBody);
+player.body.fixedRotation = true;
+player.body.updateMassProperties();
+player.body.linearDamping = 0.15;
 
-const playerMesh = new THREE.Mesh(
-  new THREE.BoxGeometry(
-    PLAYER_SIZE.x * 2,
-    PLAYER_SIZE.y * 2,
-    PLAYER_SIZE.z * 2,
-  ),
-  new THREE.MeshStandardMaterial({ color: 0x33ccff }),
-);
-scene.add(playerMesh);
+// --------------------------------------------------------
+// BUTTON (GOAL)
+// --------------------------------------------------------
+let button = spawnButton();
+
+// Spawn function
+function spawnButton() {
+  const size = new Vec3(0.7, 0.3, 0.7);
+
+  const quadrants = [
+    { xMin: -19, xMax: -1, zMin: -19, zMax: -1 },
+    { xMin: 1, xMax: 19, zMin: -19, zMax: -1 },
+    { xMin: -19, xMax: -1, zMin: 1, zMax: 19 },
+    { xMin: 1, xMax: 19, zMin: 1, zMax: 19 },
+  ];
+
+  const q = quadrants[Math.floor(Math.random() * quadrants.length)];
+
+  const randX = THREE.MathUtils.randFloat(q.xMin + 1.5, q.xMax - 1.5);
+  const randZ = THREE.MathUtils.randFloat(q.zMin + 1.5, q.zMax - 1.5);
+
+  const pos = new Vec3(randX, 0.3, randZ);
+
+  const btn = makeBox(size, pos, 0, 0xff3366, groundMat);
+
+  (btn.mesh.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(
+    0xff3366,
+  );
+
+  return btn;
+}
 
 // --------------------------------------------------------
 // INPUT
@@ -159,49 +186,84 @@ window.addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
 // UPDATE LOOP
 // --------------------------------------------------------
 let last = performance.now() / 1000;
+let hitCooldown = 0;
 
 function update(dt: number) {
-  const moveForce = 25;
+  if (gameOver) return;
 
-  // Movement
+  timeLeft -= dt;
+  if (timeLeft < 0) timeLeft = 0;
+  hudTime.textContent = timeLeft.toFixed(1);
+
+  if (timeLeft <= 0 && !gameOver) return endGame(false);
+
+  hitCooldown -= dt;
+
+  const moveForce = 25;
   const force = new Vec3(0, 0, 0);
+
   if (keys["w"]) force.z -= moveForce;
   if (keys["s"]) force.z += moveForce;
   if (keys["a"]) force.x -= moveForce;
   if (keys["d"]) force.x += moveForce;
 
-  playerBody.applyForce(force, playerBody.position);
+  player.body.applyForce(force, player.body.position);
 
-  // Jump
-  const onGround = playerBody.position.y <= PLAYER_SIZE.y + 0.55;
+  const onGround = player.body.position.y <= PLAYER_SIZE.y + 0.55;
   if (keys[" "] && onGround) {
-    playerBody.applyImpulse(new Vec3(0, 1.5, 0), playerBody.position);
+    player.body.applyImpulse(new Vec3(0, 1.5, 0), player.body.position);
   }
 
   world.step(1 / 60, dt);
 
-  // SYNC PLAYER
-  playerMesh.position.copy(playerBody.position);
-  playerMesh.quaternion.copy(playerBody.quaternion);
+  [player, button].forEach((obj) => {
+    obj.mesh.position.copy(obj.body.position);
+    obj.mesh.quaternion.copy(obj.body.quaternion);
+  });
 
-  // SYNC BUTTON (THIS WAS MISSING BEFORE)
-  button.mesh.position.copy(button.body.position);
-  button.mesh.quaternion.copy(button.body.quaternion);
+  const dist = player.body.position.vsub(button.body.position).length();
+  if (dist < 1 && hitCooldown <= 0) {
+    hitCooldown = 0.3;
+    score++;
+    hudScore.textContent = String(score);
 
-  // CAMERA FOLLOW
-  const camTarget = new THREE.Vector3(
-    playerBody.position.x,
-    playerBody.position.y + 12,
-    playerBody.position.z + 10,
+    button.mesh.scale.set(1, 0.5, 1);
+    setTimeout(() => {
+      button.mesh.scale.set(1, 1, 1);
+    }, 120);
+
+    scene.remove(button.mesh);
+    world.removeBody(button.body);
+
+    button = spawnButton();
+
+    if (score >= 10) endGame(true);
+  }
+
+  camera.position.lerp(
+    new THREE.Vector3(
+      player.body.position.x,
+      player.body.position.y + 12,
+      player.body.position.z + 10,
+    ),
+    0.12,
   );
-  camera.position.lerp(camTarget, 0.12);
   camera.lookAt(
-    playerBody.position.x,
-    playerBody.position.y + 1,
-    playerBody.position.z,
+    new THREE.Vector3(
+      player.body.position.x,
+      player.body.position.y,
+      player.body.position.z,
+    ),
   );
 }
 
+function endGame(win: boolean) {
+  gameOver = true;
+  hudMsg.style.display = "block";
+  hudMsg.textContent = win ? "MISSION COMPLETE!" : "MISSION FAILED";
+}
+
+// --------------------------------------------------------
 function loop() {
   const now = performance.now() / 1000;
   update(now - last);
@@ -210,10 +272,8 @@ function loop() {
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
-
 loop();
 
-// --------------------------------------------------------
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
