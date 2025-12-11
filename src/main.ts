@@ -121,6 +121,20 @@ function makeBox(
   return { body, mesh, size };
 }
 
+function makeInvisibleWall(size: Vec3, pos: Vec3, material?: Material) {
+  const body = new Body({
+    mass: 0,
+    shape: new CBox(size),
+    position: pos.clone(),
+    material,
+  });
+  body.type = Body.STATIC;
+  world.addBody(body);
+
+  // no mesh — invisible barrier
+  return body;
+}
+
 // --------------------------------------------------------
 // GROUND
 // --------------------------------------------------------
@@ -145,6 +159,39 @@ makeBox(
   new Vec3(0, WALL_H + 0.1, 0),
   0,
   0xaa3344,
+  wallMat,
+);
+// --------------------------------------------------------
+// ARENA INVISIBLE BOUNDARIES
+// --------------------------------------------------------
+const BARRIER_THICK = 0.5;
+const BARRIER_SIZE = 20; // matches arena size
+
+// Left wall (at x = -20.5)
+makeInvisibleWall(
+  new Vec3(BARRIER_THICK, 5, BARRIER_SIZE),
+  new Vec3(-20.5, 5, 0),
+  wallMat,
+);
+
+// Right wall (at x = +20.5)
+makeInvisibleWall(
+  new Vec3(BARRIER_THICK, 5, BARRIER_SIZE),
+  new Vec3(20.5, 5, 0),
+  wallMat,
+);
+
+// Bottom wall (z = -20.5)
+makeInvisibleWall(
+  new Vec3(BARRIER_SIZE, 5, BARRIER_THICK),
+  new Vec3(0, 5, -20.5),
+  wallMat,
+);
+
+// Top wall (z = +20.5)
+makeInvisibleWall(
+  new Vec3(BARRIER_SIZE, 5, BARRIER_THICK),
+  new Vec3(0, 5, 20.5),
   wallMat,
 );
 
