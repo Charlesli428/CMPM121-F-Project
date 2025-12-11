@@ -10,7 +10,7 @@ import {
 } from "cannon-es";
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-
+type KeyColor = "red" | "green" | "blue";
 // --------------------------------------------------------
 // SCENE + CAMERA + RENDERER
 // --------------------------------------------------------
@@ -58,7 +58,12 @@ const SCENE2_Z_OFFSET = 100;
 // --------------------------------------------------------
 // INVENTORY SYSTEM
 // --------------------------------------------------------
-let heldKey: string | null = null; // "red", "green", "blue"
+const inventory: Record<KeyColor, number> = {
+  red: 0,
+  green: 0,
+  blue: 0,
+};
+// "red", "green", "blue"
 
 const keyColors = ["red", "green", "blue"];
 
@@ -66,15 +71,9 @@ function keyColorHex(name: string): number {
   return name === "red" ? 0xff0000 : name === "green" ? 0x00ff00 : 0x0000ff; // blue
 }
 
-function updateKeyBox() {
-  if (!heldKey) {
-    (hudKeyBox as HTMLElement).style.background = "transparent";
-    return;
-  }
-  hudKeyBox.style.background =
-    "#" + keyColorHex(heldKey).toString(16).padStart(6, "0");
+function updateInventoryHUD() {
+  hudKeyBox.textContent = `Red: ${inventory.red} | Green: ${inventory.green} | Blue: ${inventory.blue}`;
 }
-
 // --------------------------------------------------------
 // PHYSICS WORLD
 // --------------------------------------------------------
@@ -325,11 +324,11 @@ function spawnButton() {
     colorHex,
   );
 
-  return { ...btn, color: colorName, scene: sceneIndex };
+  return { ...btn, color: colorName as KeyColor, scene: sceneIndex };
 }
 
 let button = spawnButton();
-key = spawnKey(button.color); // initial key matches first button
+key = spawnKey(keyColors[Math.floor(Math.random() * keyColors.length)]);
 
 // --------------------------------------------------------
 // INPUT
@@ -350,21 +349,23 @@ window.addEventListener(
 window.addEventListener("mousedown", (event) => {
   if (!key) return;
 
-  // Convert mouse position to NDC space
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
   raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObject(key.mesh, false);
 
-  if (intersects.length > 0) {
-    // Pick up key
-    heldKey = key.color;
-    updateKeyBox();
+  const hits = raycaster.intersectObject(key.mesh, false);
+
+  if (hits.length > 0) {
+    inventory[key.color as KeyColor] += 1;
+    updateInventoryHUD();
+
     scene.remove(key.mesh);
     world.removeBody(key.body);
+    key = spawnKey(keyColors[Math.floor(Math.random() * keyColors.length)]);
   }
 });
+
 // --------------------------------------------------------
 // UPDATE LOOP
 // --------------------------------------------------------
@@ -417,25 +418,18 @@ function update(dt: number) {
     );
   });
 
-  // KEY PICKUP
-  const keyDist = player.body.position.vsub(key.body.position).length();
-  if (keyDist < 1) {
-    heldKey = key.color;
-    updateKeyBox();
-    scene.remove(key.mesh);
-    world.removeBody(key.body);
-  }
-
   // BUTTON INTERACTION
   const dist = player.body.position.vsub(button.body.position).length();
   if (dist < 1 && hitCooldown <= 0) {
     hitCooldown = 0.3;
-    if (heldKey !== button.color) {
+    if (inventory[button.color] <= 0) {
       hudMsg.style.display = "block";
-      hudMsg.textContent = "WRONG KEY!";
+      hudMsg.textContent = "You don't have that key!";
       setTimeout(() => (hudMsg.style.display = "none"), 700);
       return;
     }
+    inventory[button.color] -= 1;
+    updateInventoryHUD();
     // correct key
     score++;
     hudScore.textContent = String(score);
@@ -446,11 +440,7 @@ function update(dt: number) {
     scene.remove(button.mesh);
     world.removeBody(button.body);
 
-    heldKey = null;
-    updateKeyBox();
-
     button = spawnButton();
-    key = spawnKey(button.color);
 
     if (score >= 10) endGame(true);
   }
